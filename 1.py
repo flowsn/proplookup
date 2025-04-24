@@ -92,11 +92,10 @@ def get_bbl_from_address(street, borough):
 def get_summary_from_backend(docs):
     if not docs:
         return ["No documents to summarize."]
-    default_instructions = [
-        "Analyze deed history.",
-        "Show currently active mortgage and amount.",
-        "Analyze if there is a pre-2008 mortgage that was assigned. If yes, look for indication of assignment chain breakage."
-    ]
+default_instructions = [
+    "Analyze deed history, but very concisely; show just this - current owner (NAME), open mortgage (AMOUNT), active tax liens (YES/NO)",
+    "Analyze if there is a mortgage that originated 2008 or earlier and was not satisfied, was assigned. If yes, look for indication of assignment chain breakage."
+]
     lines = [f"{d['doc_type']} on {d['document_date']} (${d['document_amt']:.0f}) between {', '.join(d['party1'])} and {', '.join(d['party2'])}" for d in docs[:10]]
     prompt = (
         "You are an expert in NYC real estate. Follow these instructions:\n"
