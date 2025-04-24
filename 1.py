@@ -92,7 +92,7 @@ def get_bbl_from_address(street, borough):
 def get_summary_from_backend(docs):
     if not docs:
         return ["No documents to summarize."]
-default_instructions = [
+    default_instructions = [
     "Analyze deed history, but very concisely; show just this - current owner (NAME), open mortgage (AMOUNT), active tax liens (YES/NO)",
     "Analyze if there is a mortgage that originated 2008 or earlier and was not satisfied, was assigned. If yes, look for indication of assignment chain breakage."
 ]
@@ -222,7 +222,7 @@ HTML_TEMPLATE = '''
     {% if pip_docs %}
     <table>
       <thead>
-        <tr><th>CRFN</th><th>Lot</th><th>Doc Date</th><th>Document Type</th><th>Party1</th><th>Party2</th><th>Doc Amount</th></tr>
+        <tr><th>CRFN</th><th>Lot</th><th>Doc Date</th><th>Recorded</th><th>Document Type</th><th>Party1</th><th>Party2</th><th>Doc Amount</th></tr>
       </thead>
       <tbody>
         {% for doc in pip_docs %}
@@ -240,6 +240,7 @@ HTML_TEMPLATE = '''
             <td>{{ doc.doc_id }}</td>
             <td>{{ lot }}</td>
             <td>{{ doc.document_date }}</td>
+            <td>{{ doc.recorded_datetime }}</td>
             <td>{{ doc.doc_type }}</td>
             <td>{{ doc.party1|join(', ') }}</td>
             <td>{{ doc.party2|join(', ') }}</td>
