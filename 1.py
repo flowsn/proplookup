@@ -1,0 +1,289 @@
+from flask import Flask, request, render_template_string, jsonify
+import os
+import requests
+import json
+import urllib.parse
+from datetime import datetime
+
+app = Flask(__name__)
+
+# API keys
+GEOCLIENT_KEY = '3bd5c70fec6f4c8f9a59821a303eeb72'  # Primary key
+GEOCLIENT_SECONDARY_KEY = '107c23829655446a98802eeceb127c7b'  # Secondary key
+GOOGLE_KEY = 'AIzaSyDBCR8XDh6aVnm0JaQGH4pLzG_KXy2Nsro'
+
+# Helper to parse datetime strings
+def parse_datetime(dt_str):
+    try:
+        return datetime.strptime(dt_str, '%m/%d/%Y %I:%M:%S %p')
+    except:
+        return datetime.min
+
+# Build ACRIS document image URL
+def generate_document_url(doc_id):
+    return f"https://a836-acris.nyc.gov/DS/DocumentSearch/DocumentImageView?doc_id={doc_id}"
+
+# Fetch deed (SALES) and mortgage (OTHER) records via PIP proxy
+def get_pip_docs(bc, block, lot):
+    try:
+        blk = str(int(block))
+        lt = str(int(lot))
+    except:
+        return [], ''
+    docs_data = []
+    pip_raw = ''
+    for rt in ('OTHER', 'SALES'):
+        url = (
+            'https://propertyinformationportal.nyc.gov/proxy/proxy.ashx?'
+            'https://a836-acrissds.nyc.gov/AcrisDtm/AcrisDtmApi/AcrisDocuments'
+            f'?returntype={rt}&borough={bc}&block={blk}&lot={lt}'
+        )
+        resp = requests.get(url)
+        if resp.status_code != 200:
+            continue
+        try:
+            raw = resp.json()
+        except:
+            continue
+        if not pip_raw:
+            pip_raw = json.dumps(raw, indent=2)
+        docs_data.extend(raw.get('documents') or [])
+    simplified = []
+    for d in docs_data:
+        simplified.append({
+            'doc_id': d.get('doc_id', ''),
+            'document_date': d.get('document_date', ''),
+            'recorded_datetime': d.get('recorded_datetime', ''),
+            'doc_type': d.get('doc_type', ''),
+            'document_amt': d.get('document_amt', 0.0),
+            'party1': [p.get('name') for p in d.get('party1', [])],
+            'party2': [p.get('name') for p in d.get('party2', [])],
+            'url': generate_document_url(d.get('doc_id', ''))
+        })
+    simplified.sort(key=lambda x: parse_datetime(x['recorded_datetime']), reverse=True)
+    return simplified, pip_raw
+
+# Convert address to BBL and coordinates, retry with secondary if needed
+def get_bbl_from_address(street, borough):
+    try:
+        num, name = street.split(' ', 1)
+    except ValueError:
+        return None, None, None, None, None, None, {}
+    headers = {'Ocp-Apim-Subscription-Key': GEOCLIENT_KEY}
+    params = {'houseNumber': num, 'street': name, 'borough': borough}
+    resp = requests.get('https://api.nyc.gov/geoclient/v2/address', params=params, headers=headers)
+    if resp.status_code == 401 and GEOCLIENT_SECONDARY_KEY:
+        headers['Ocp-Apim-Subscription-Key'] = GEOCLIENT_SECONDARY_KEY
+        resp = requests.get('https://api.nyc.gov/geoclient/v2/address', params=params, headers=headers)
+    raw = resp.json()
+    a = raw.get('address', {})
+    try:
+        bc = a['bblBoroughCode']
+        block = a['bblTaxBlock'].zfill(5)
+        lot = a['bblTaxLot'].zfill(4)
+        full_addr = f"{num} {name}, {borough}"
+        lat = a.get('latitude')
+        lon = a.get('longitude')
+        return bc, block, lot, full_addr, lat, lon, raw
+    except KeyError:
+        return None, None, None, None, None, None, raw
+
+# Query backend for ChatGPT summary
+def get_summary_from_backend(docs):
+    if not docs:
+        return ["No documents to summarize."]
+    default_instructions = [
+        "Analyze deed history.",
+        "Show currently active mortgage and amount.",
+        "Analyze if there is a pre-2008 mortgage that was assigned. If yes, look for indication of assignment chain breakage."
+    ]
+    lines = [f"{d['doc_type']} on {d['document_date']} (${d['document_amt']:.0f}) between {', '.join(d['party1'])} and {', '.join(d['party2'])}" for d in docs[:10]]
+    prompt = (
+        "You are an expert in NYC real estate. Follow these instructions:\n"
+        + "\n".join(default_instructions) + "\n\n"
+        + "Recent document activity:\n" + "\n".join(lines)
+    )
+    try:
+        resp = requests.post('https://chatgpt-backend-vm6c.onrender.com/analyze', json={'prompt': prompt})
+        if resp.status_code == 200:
+            return resp.json().get('result', '').split('\n')
+        return [f"(Backend error {resp.status_code})"]
+    except Exception as e:
+        return [f"(Error contacting backend: {e})"]
+
+# Endpoint to fetch summary asynchronously
+@app.route('/summary', methods=['POST'])
+def summary_api():
+    data = request.get_json() or {}
+    docs = data.get('docs', [])
+    result = get_summary_from_backend(docs)
+    return jsonify({'summary': result})
+
+@app.route('/')
+def index():
+    street = request.args.get('street')
+    borough = request.args.get('borough')
+    bbl = request.args.get('bbl')
+
+    geoclient_raw = None
+    bc = block = lot = full_address = lat = lon = None
+
+    if bbl:
+        try:
+            bc, block, lot = bbl.split('-')
+            block = block.zfill(5)
+            lot = lot.zfill(4)
+            full_address = f"BBL {bbl}"
+        except ValueError:
+            return render_template_string(HTML_TEMPLATE, google_key=GOOGLE_KEY)
+    elif street and borough:
+        bc, block, lot, full_address, lat, lon, geoclient_raw = get_bbl_from_address(street, borough)
+        if not bc:
+            return render_template_string(HTML_TEMPLATE, full_address=street, bbl='?', geoclient_raw=json.dumps(geoclient_raw, indent=2), google_key=GOOGLE_KEY)
+    else:
+        return render_template_string(HTML_TEMPLATE, google_key=GOOGLE_KEY)
+
+    pip_docs, pip_raw = get_pip_docs(bc, block, lot)
+    return render_template_string(
+        HTML_TEMPLATE,
+        full_address=full_address,
+        bbl=f"{bc}-{block}-{lot}",
+        bc=bc,
+        block=block,
+        lot=lot,
+        lat=lat,
+        lon=lon,
+        pip_docs=pip_docs,
+        pip_raw=pip_raw,
+        google_key=GOOGLE_KEY,
+        geoclient_raw=geoclient_raw
+    )
+
+# HTML template
+HTML_TEMPLATE = '''
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>NYC Property Lookup</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; }
+    h2.result { font-size: 1.6em; margin-bottom: 0.5em; }
+    .maps { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+    .clear { clear: both; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.85rem; margin-top:1rem; }
+    th, td { border: 1px solid #ccc; padding: 0.3rem 0.5rem; text-align: left; }
+    th { background: #eaeaea; }
+    .deed     { background: #d4f7d4; }
+    .mortgage { background: #ffd1d1; }
+    .tax-lien { background: #d0eaff; }
+    .ucc      { background: #d3d3d3; }
+    .other    { background: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <h1>NYC Property Lookup</h1>
+  <form method="get">
+    <div>
+      <label><strong>Search by Address:</strong></label><br>
+      <input type="text" name="street" placeholder="123 Main St" style="width:300px;">
+      <select name="borough">
+        <option>Manhattan</option><option>Brooklyn</option><option>Queens</option><option>Bronx</option><option>Staten Island</option>
+      </select>
+    </div>
+    <div style="margin-top:1rem;">
+      <label><strong>Or BBL:</strong></label><br>
+      <input type="text" name="bbl" placeholder="1-00862-1274" style="width:300px;">
+    </div>
+    <button type="submit" style="margin-top:1rem;">Search</button>
+  </form>
+
+  {% if full_address %}
+    {% if lat and lon %}
+      <div class="maps">
+        <iframe width="100%" height="300" src="https://www.google.com/maps/embed/v1/streetview?key={{ google_key }}&location={{ lat }},{{ lon }}" allowfullscreen></iframe>
+        <iframe width="100%" height="300" src="https://www.google.com/maps/embed/v1/place?key={{ google_key }}&q={{ lat }},{{ lon }}" allowfullscreen></iframe>
+      </div>
+    {% endif %}
+
+    <h2 class="result">{{ full_address }} (BBL: {{ bbl }})</h2>
+    <ul>
+      <li><a href="https://a836-acris.nyc.gov/bblsearch/bblsearch.asp?borough={{ bc }}&block={{ block }}&lot={{ lot }}" target="_blank">ACRIS</a></li>
+      <li><a href="https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet?boro={{ bc }}&block={{ block }}&lot={{ lot }}" target="_blank">DOB BIS</a></li>
+      <li><a href="https://www.google.com/maps/place/{{ full_address|urlencode }}" target="_blank">Google Maps</a></li>
+      <li><a href="https://propertyinformationportal.nyc.gov/parcels/parcel/{{ bc }}{{ block }}{{ lot }}" target="_blank">PIP</a></li>
+      <li><a href="https://a836-pts-access.nyc.gov/care/datalets/datalet.aspx?mode=profileall2&pin={{ bc }}{{ block }}{{ lot }}&jur=65" target="_blank">Tax Account</a></li>
+    </ul>
+
+    <h3>All Documents (Newest First)</h3>
+    {% if pip_docs %}
+    <table>
+      <thead>
+        <tr><th>CRFN</th><th>Lot</th><th>Doc Date</th><th>Document Type</th><th>Party1</th><th>Party2</th><th>Doc Amount</th></tr>
+      </thead>
+      <tbody>
+        {% for doc in pip_docs %}
+          {% set dt = doc.doc_type.upper() %}
+          {% if 'TAX LIEN' in dt %}
+            {% set cls='tax-lien' %}
+          {% elif 'UCC' in dt %}
+            {% set cls='ucc' %}
+          {% elif 'DEED' in dt %}
+            {% set cls='deed' %}
+          {% else %}
+            {% set cls='mortgage' %}
+          {% endif %}
+          <tr class="{{ cls }}">
+            <td>{{ doc.doc_id }}</td>
+            <td>{{ lot }}</td>
+            <td>{{ doc.document_date }}</td>
+            <td>{{ doc.doc_type }}</td>
+            <td>{{ doc.party1|join(', ') }}</td>
+            <td>{{ doc.party2|join(', ') }}</td>
+            <td>{{ '{:,.2f}'.format(doc.document_amt) }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p><em>No documents found.</em></p>
+    {% endif %}
+
+    <h3 id="summary-header">AI Summary</h3>
+    <div id="summary">Loading summary...</div>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', async () => {
+        const docs = {{ pip_docs|tojson }};
+        const res = await fetch('/summary', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({docs})
+        });
+        const data = await res.json();
+        const container = document.getElementById('summary');
+        if (data.summary.length) {
+          const tbl = document.createElement('table');
+          tbl.style.width = '100%'; tbl.style.marginTop = '1rem';
+          const tbody = document.createElement('tbody');
+          data.summary.forEach(line => {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td'); td.innerHTML = `<strong>${line}</strong>`;
+            tr.appendChild(td); tbody.appendChild(tr);
+          });
+          tbl.appendChild(tbody);
+          container.innerHTML = ''; container.appendChild(tbl);
+        } else {
+          container.textContent = '(No summary available)';
+        }
+      });
+    </script>
+  {% endif %}
+</body>
+</html>
+'''
+
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
