@@ -188,8 +188,12 @@ HTML_TEMPLATE = '''
       <label><strong>Search by Address:</strong></label><br>
       <input type="text" name="street" placeholder="123 Main St" style="width:300px;">
       <select name="borough">
-        <option>Manhattan</option><option>Brooklyn</option><option>Queens</option><option>Bronx</option><option>Staten Island</option>
-      </select>
+  <option>Manhattan</option>
+  <option selected>Brooklyn</option>
+  <option>Queens</option>
+  <option>Bronx</option>
+  <option>Staten Island</option>
+</select>
     </div>
     <div style="margin-top:1rem;">
       <label><strong>Or BBL:</strong></label><br>
