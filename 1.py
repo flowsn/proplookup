@@ -186,18 +186,18 @@ HTML_TEMPLATE = '''
   <form method="get">
     <div>
       <label><strong>Search by Address:</strong></label><br>
-      <input type="text" name="street" placeholder="123 Main St" style="width:300px;">
+      <input type="text" name="street" placeholder="123 Main St" style="width:300px;" value="{{ street|default('') }}">
       <select name="borough">
-  <option>Manhattan</option>
-  <option selected>Brooklyn</option>
-  <option>Queens</option>
-  <option>Bronx</option>
-  <option>Staten Island</option>
+  <option value="Manhattan" {% if borough == 'Manhattan' %}selected{% endif %}>Manhattan</option>
+  <option value="Brooklyn" {% if borough == 'Brooklyn' or not borough %}selected{% endif %}>Brooklyn</option>
+  <option value="Queens" {% if borough == 'Queens' %}selected{% endif %}>Queens</option>
+  <option value="Bronx" {% if borough == 'Bronx' %}selected{% endif %}>Bronx</option>
+  <option value="Staten Island" {% if borough == 'Staten Island' %}selected{% endif %}>Staten Island</option>
 </select>
     </div>
     <div style="margin-top:1rem;">
       <label><strong>Or BBL:</strong></label><br>
-      <input type="text" name="bbl" placeholder="1-00862-1274" style="width:300px;">
+      <input type="text" name="bbl" placeholder="1-00862-1274" style="width:300px;" value="{{ bbl|default('') }}">
     </div>
     <button type="submit" style="margin-top:1rem;">Search</button>
   </form>
