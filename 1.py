@@ -8,8 +8,8 @@ from datetime import datetime
 app = Flask(__name__)
 
 # API keys
-GEOCLIENT_KEY = '3bd5c70fec6f4c8f9a59821a303eeb72'  # Primary key
-GEOCLIENT_SECONDARY_KEY = '107c23829655446a98802eeceb127c7b'  # Secondary key
+GEOCLIENT_KEY = '3bd5c70fec6f4c8f9a59821a303eeb72'  # Primary Geoclient API key
+GEOCLIENT_SECONDARY_KEY = '107c23829655446a98802eeceb127c7b'  # Secondary Geoclient API key
 GOOGLE_KEY = 'AIzaSyDBCR8XDh6aVnm0JaQGH4pLzG_KXy2Nsro'
 
 
@@ -89,7 +89,10 @@ def get_pip_docs(bc, block, lot):
 
 def generate_tax_url(bc, block, lot):
     pin = f"{int(bc)}{block}{lot}"
-    return f"https://a836-pts-access.nyc.gov/care/datalets/datalet.aspx?mode=profileall2&s&UseSearch=no&pin={pin}&jur=65"
+    return (
+        "https://a836-pts-access.nyc.gov/care/datalets/datalet.aspx?"
+        f"mode=profileall2&UseSearch=no&pin={pin}&jur=65"
+    )
 
 @app.route('/')
 def index():
@@ -132,6 +135,14 @@ def index():
         geoclient_raw=geoclient_raw,
         tax_url=tax_url
     )
+
+
+@app.route('/summary', methods=['POST'])
+def summary():
+    data = request.get_json(silent=True) or {}
+    docs = data.get('docs', [])
+    lines = [f"{d.get('recorded_datetime')} - {d.get('doc_type')}" for d in docs]
+    return jsonify(summary=lines)
 
 HTML_TEMPLATE = '''
 <!doctype html>
