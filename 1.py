@@ -2,8 +2,8 @@ from flask import Flask, request, render_template_string, jsonify
 import os
 import requests
 import json
-import urllib.parse
 from datetime import datetime
+from collections import Counter
 
 app = Flask(__name__)
 
@@ -90,6 +90,25 @@ def get_pip_docs(bc, block, lot):
 def generate_tax_url(bc, block, lot):
     pin = f"{int(bc)}{block}{lot}"
     return f"https://a836-pts-access.nyc.gov/care/datalets/datalet.aspx?mode=profileall2&s&UseSearch=no&pin={pin}&jur=65"
+
+def summarize_docs(docs):
+    """Generate a very small textual summary of the provided documents."""
+    if not docs:
+        return []
+    counter = Counter(d.get("doc_type", "").upper() for d in docs if d.get("doc_type"))
+    lines = [f"{doc_type.title()}: {count}" for doc_type, count in counter.most_common()]
+    docs_sorted = sorted(docs, key=lambda d: parse_datetime(d.get("recorded_datetime", "")), reverse=True)
+    latest = docs_sorted[0]
+    rec_dt = latest.get("recorded_datetime") or latest.get("document_date")
+    lines.append(f"Most recent document: {latest.get('doc_type', 'Unknown')} on {rec_dt}")
+    return lines
+
+@app.route('/summary', methods=['POST'])
+def summary_endpoint():
+    data = request.get_json(force=True) or {}
+    docs = data.get('docs') or []
+    summary = summarize_docs(docs)
+    return jsonify({'summary': summary})
 
 @app.route('/')
 def index():
@@ -201,7 +220,7 @@ HTML_TEMPLATE = '''
         </thead>
         <tbody>
           {% for doc in pip_docs %}
-          <tr class="{{ 'tax-lien' if 'TAX LIEN' in doc.doc_type.upper() else 'ucc' if 'UCC' in doc.doc_type.upper() else 'deed' if 'DEED' in doc.doc_type.upper() else 'mortgage' }}">
+          <tr class="{{ 'tax-lien' if 'TAX LIEN' in doc.doc_type.upper() else 'ucc' if 'UCC' in doc.doc_type.upper() else 'deed' if 'DEED' in doc.doc_type.upper() else 'mortgage' if 'MORTGAGE' in doc.doc_type.upper() else 'other' }}">
             <td><a href="{{ doc.url }}" target="_blank">{{ doc.doc_id }}</a></td>
             <td>{{ lot }}</td>
             <td>{{ doc.document_date }}</td>
