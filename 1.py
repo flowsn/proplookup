@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template_string, jsonify
+from flask import Flask, request, render_template_string
 import os
 import requests
 import json
@@ -218,34 +218,6 @@ HTML_TEMPLATE = '''
       <p>No documents found.</p>
     {% endif %}
 
-    <h3>AI Summary</h3>
-    <div id="summary">Loading summary...</div>
-    <script>
-      document.addEventListener('DOMContentLoaded', async () => {
-        const docs = {{ pip_docs|tojson }};
-        const res = await fetch('/summary', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({docs})
-        });
-        const data = await res.json();
-        const container = document.getElementById('summary');
-        if (data.summary.length) {
-          const tbl = document.createElement('table');
-          tbl.style.width = '100%'; tbl.style.marginTop = '1rem';
-          const tbody = document.createElement('tbody');
-          data.summary.forEach(line => {
-            const tr = document.createElement('tr');
-            const td = document.createElement('td'); td.innerHTML = `<strong>${line}</strong>`;
-            tr.appendChild(td); tbody.appendChild(tr);
-          });
-          tbl.appendChild(tbody);
-          container.innerHTML = ''; container.appendChild(tbl);
-        } else {
-          container.textContent = '(No summary available)';
-        }
-      });
-    </script>
   {% endif %}
 </body>
 </html>
@@ -253,4 +225,4 @@ HTML_TEMPLATE = '''
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
