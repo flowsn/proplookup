@@ -100,7 +100,7 @@ def index():
     bc = block = lot = full_address = lat = lon = None
     geoclient_raw = None
 
-    if bbl and not (street or borough):
+    if bbl:
         try:
             bc, block, lot = bbl.split('-')
             block = block.zfill(5)
