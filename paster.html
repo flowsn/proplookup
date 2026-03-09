@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Brooklyn Auction PDF Addresses</title>
+<style>
+body { font-family: sans-serif; margin: 20px; }
+textarea { width: 100%; height: 200px; }
+table { border-collapse: collapse; margin-top: 16px; width: 100%; }
+th, td { border: 1px solid #ccc; padding: 4px 8px; }
+th { background: #f0f0f0; }
+#map { height: 420px; width: 100%; border: 1px solid #ccc; border-radius: 8px; margin-top: 20px; }
+</style>
+</head>
+<body>
+<h1>Brooklyn Auction PDF Filenames</h1>
+<p>Source: <a href="https://www.nycourts.gov/legacyPDFs/courts/2jd/kings/civil/foreclosures/foreclosure%20scans/" target="_blank">Live Court Page</a></p>
+<textarea id="src" placeholder="Paste HTML source or lines like: 8/1/2025 10:33 AM 26477 1126-53rd-Street.pdf"></textarea>
+<br>
+<button id="parseBtn">Parse &amp; Fetch BBL</button>
+<div id="stats"></div>
+<div id="tableWrap"></div>
+<h3>Map of Addresses</h3>
+<div id="map"></div>
+<div style="color:#666;font-size:12px;margin-top:6px">Pins geocoded via Google Maps (Brooklyn).</div>
+
+<script>
+const GEOCLIENT_PRIMARY_KEY   = '3bd5c70fec6f4c8f9a59821a303eeb72';
+const GEOCLIENT_SECONDARY_KEY = '107c23829655446a98802eeceb127c7b';
+
+let gMap, gGeocoder, gBounds, gReady = false, lastSig = '';
+
+function initMap() {
+  const el = document.getElementById('map');
+  if (!el) return;
+  gMap      = new google.maps.Map(el, { zoom: 11, center: { lat: 40.650002, lng: -73.949997 }, mapTypeControl: false });
+  gGeocoder = new google.maps.Geocoder();
+  gBounds   = new google.maps.LatLngBounds();
+  gReady    = true;
+}
+
+function cleanAddress(filename) {
+  const name = filename.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return name.replace(/^\d+\/\d+\/\d+.*?(\d{1,6}\s+.*)$/, '$1').trim();
+}
+
+function geoclientUrl(house, street, key) {
+  const u = new URL('https://api.nyc.gov/geoclient/v2/address');
+  u.searchParams.set('houseNumber', house);
+  u.searchParams.set('street', street);
+  u.searchParams.set('borough', 'Brooklyn');
+  u.searchParams.set('subscription-key', key);
+  return u.toString();
+}
+
+async function fetchBBL(addr) {
+  const m = addr.match(/^(\d{1,6})\s+(.+)$/);
+  if (!m) return '';
+  const [, house, street] = m;
+  for (const key of [GEOCLIENT_PRIMARY_KEY, GEOCLIENT_SECONDARY_KEY]) {
+    try {
+      const r = await fetch(geoclientUrl(house, street, key));
+      if (!r.ok) continue;
+      const j = await r.json();
+      const a = j && j.address;
+      if (!a) continue;
+      // v2 returns components separately — combine into 10-digit BBL
+      if (a.bbl) return a.bbl.toString();
+      const bc    = a.bblBoroughCode;
+      const block = a.bblTaxBlock;
+      const lot   = a.bblTaxLot;
+      if (bc && block && lot) {
+        return `${bc}${block.toString().padStart(5, '0')}${lot.toString().padStart(4, '0')}`;
+      }
+    } catch (e) {
+      console.error('fetchBBL error:', e);
+    }
+  }
+  return '';
+}
+
+function splitBBL(bbl) {
+  const s = (bbl || '').toString().trim();
+  if (!/^\d{10}$/.test(s)) return null;
+  return { bc: s[0], block: s.slice(1, 6), lot: s.slice(6) };
+}
+
+function fmtBBL(bbl) {
+  const p = splitBBL(bbl);
+  if (!p) return bbl || '';
+  return `${p.bc}-${p.block.padStart(5, '0')}-${p.lot.padStart(4, '0')}`;
+}
+
+function linksFor(address, bbl) {
+  const encAddr = encodeURIComponent(address + ', Brooklyn, NY');
+  const p = splitBBL(bbl);
+  const gmaps = `https://www.google.com/maps/place/${encAddr}`;
+  if (!p) return { gmaps, acris: '', bis: '', pip: '', tax: '' };
+  return {
+    gmaps,
+    acris: `https://a836-acris.nyc.gov/bblsearch/bblsearch.asp?borough=${p.bc}&block=${p.block}&lot=${p.lot}`,
+    bis:   `https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet?boro=${p.bc}&block=${p.block}&lot=${p.lot}`,
+    pip:   `https://propertyinformationportal.nyc.gov/parcels/parcel/${bbl}`,
+    tax:   `https://a836-pts-access.nyc.gov/care/datalets/datalet.aspx?mode=profileall2&s&UseSearch=no&pin=${bbl}&jur=65`
+  };
+}
+
+async function parseAndDisplay() {
+  gBounds = new google.maps.LatLngBounds();
+
+  const text      = document.getElementById('src').value || '';
+  const filenames = (text.match(/[^\s"'>]+\.pdf/gi) || []).map(m => decodeURIComponent(m.split('/').pop()));
+  const addresses = filenames.map(cleanAddress).filter(Boolean);
+  document.getElementById('stats').textContent = `${addresses.length} address(es) found`;
+
+  let html = '<table><thead><tr><th>#</th><th>Address (Brooklyn)</th><th>BBL</th><th>ACRIS</th><th>DOB BIS</th><th>Google Maps</th><th>PIP</th><th>Tax</th></tr></thead><tbody>';
+  addresses.forEach((addr, i) => {
+    html += `<tr><td>${i + 1}</td><td>${addr}</td><td id="bbl-${i}">…</td><td id="acris-${i}"></td><td id="bis-${i}"></td><td id="gmaps-${i}"></td><td id="pip-${i}"></td><td id="tax-${i}"></td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('tableWrap').innerHTML = html;
+
+  const link = (href, text) => href ? `<a href="${href}" target="_blank">${text}</a>` : '';
+
+  for (let i = 0; i < addresses.length; i++) {
+    const addr = addresses[i];
+    const raw  = await fetchBBL(addr);
+    const fmt  = fmtBBL(raw);
+    const L    = linksFor(addr, raw);
+
+    document.getElementById(`bbl-${i}`).textContent          = fmt || '—';
+    document.getElementById(`acris-${i}`).innerHTML           = link(L.acris, 'ACRIS');
+    document.getElementById(`bis-${i}`).innerHTML             = link(L.bis, 'DOB BIS');
+    document.getElementById(`gmaps-${i}`).innerHTML           = link(L.gmaps, 'Google Maps');
+    document.getElementById(`pip-${i}`).innerHTML             = link(L.pip, 'PIP');
+    document.getElementById(`tax-${i}`).innerHTML             = link(L.tax, 'Tax');
+
+    // Map pin
+    if (gReady && gGeocoder) {
+      gGeocoder.geocode({ address: addr + ', Brooklyn, NY' }, (results, status) => {
+        if (status === 'OK' && results[0]) {
+          const loc    = results[0].geometry.location;
+          const marker = new google.maps.Marker({ map: gMap, position: loc, title: addr });
+          const iw     = new google.maps.InfoWindow({
+            content: `<div style="font-size:13px"><strong>${addr}</strong>` +
+                     (fmt ? `<br>BBL: ${fmt}` : '') +
+                     `<br>${link(L.acris, 'ACRIS')} · ${link(L.bis, 'DOB BIS')} · ${link(L.pip, 'PIP')}</div>`
+          });
+          marker.addListener('click', () => iw.open({ anchor: marker, map: gMap }));
+          gBounds.extend(loc);
+          if (!gBounds.isEmpty()) gMap.fitBounds(gBounds);
+        }
+      });
+    }
+
+    await new Promise(r => setTimeout(r, 150));
+  }
+}
+
+document.getElementById('parseBtn').addEventListener('click', parseAndDisplay);
+</script>
+<script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDBCR8XDh6aVnm0JaQGH4pLzG_KXy2Nsro&callback=initMap"></script>
+</body>
+</html>
