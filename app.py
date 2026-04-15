@@ -24,6 +24,26 @@ def parse_datetime(dt_str):
 def generate_document_url(doc_id):
     return f"https://a836-acris.nyc.gov/DS/DocumentSearch/DocumentImageView?doc_id={doc_id}"
 
+def get_details_from_bbl(bc, block, lot):
+    headers = {'Ocp-Apim-Subscription-Key': GEOCLIENT_KEY}
+    params = {'borough': bc, 'block': str(int(block)), 'lot': str(int(lot))}
+    resp = requests.get('https://api.nyc.gov/geoclient/v2/bbl', params=params, headers=headers)
+    if resp.status_code == 401 and GEOCLIENT_SECONDARY_KEY:
+        headers['Ocp-Apim-Subscription-Key'] = GEOCLIENT_SECONDARY_KEY
+        resp = requests.get('https://api.nyc.gov/geoclient/v2/bbl', params=params, headers=headers)
+    raw = resp.json()
+    b = raw.get('bbl', {})
+    lat = b.get('latitude')
+    lon = b.get('longitude')
+    house = b.get('houseNumberIn', '') or b.get('houseNumber', '')
+    street_name = b.get('firstStreetNameNormalized', '') or b.get('streetName1In', '')
+    boro_name = b.get('firstBoroughName', '')
+    if house and street_name:
+        full_addr = f"{house} {street_name}, {boro_name}"
+    else:
+        full_addr = None
+    return lat, lon, full_addr, raw
+
 def get_bbl_from_address(street, borough):
     try:
         num, name = street.split(' ', 1)
@@ -105,13 +125,14 @@ def index():
             bc, block, lot = bbl.split('-')
             block = block.zfill(5)
             lot = lot.zfill(4)
-            full_address = f"BBL {bbl}"
         except ValueError:
-            return render_template_string(HTML_TEMPLATE, google_key=GOOGLE_KEY)
+            return render_template_string(HTML_TEMPLATE, google_key=GOOGLE_KEY, bbl_input=bbl, street=street, borough=borough)
+        lat, lon, resolved_address, geoclient_raw = get_details_from_bbl(bc, block, lot)
+        full_address = resolved_address or f"BBL {bbl}"
     elif street and borough:
         bc, block, lot, full_address, lat, lon, geoclient_raw = get_bbl_from_address(street, borough)
         if not bc:
-            return render_template_string(HTML_TEMPLATE, google_key=GOOGLE_KEY)
+            return render_template_string(HTML_TEMPLATE, google_key=GOOGLE_KEY, bbl_input=bbl, street=street, borough=borough)
     else:
         return render_template_string(HTML_TEMPLATE, google_key=GOOGLE_KEY)
 
@@ -130,7 +151,10 @@ def index():
         pip_raw=pip_raw,
         google_key=GOOGLE_KEY,
         geoclient_raw=geoclient_raw,
-        tax_url=tax_url
+        tax_url=tax_url,
+        bbl_input=bbl,
+        street=street,
+        borough=borough,
     )
 
 HTML_TEMPLATE = '''
@@ -157,18 +181,18 @@ HTML_TEMPLATE = '''
   <form method="get">
     <div>
       <label><strong>Search by Address:</strong></label><br>
-      <input type="text" name="street" placeholder="123 Main St" style="width:300px;" value="">
+      <input type="text" name="street" placeholder="123 Main St" style="width:300px;" value="{{ street or '' }}">
       <select name="borough">
-        <option value="Manhattan">Manhattan</option>
-        <option value="Brooklyn" selected>Brooklyn</option>
-        <option value="Queens">Queens</option>
-        <option value="Bronx">Bronx</option>
-        <option value="Staten Island">Staten Island</option>
+        <option value="Manhattan"{% if borough == 'Manhattan' %} selected{% endif %}>Manhattan</option>
+        <option value="Brooklyn"{% if not borough or borough == 'Brooklyn' %} selected{% endif %}>Brooklyn</option>
+        <option value="Queens"{% if borough == 'Queens' %} selected{% endif %}>Queens</option>
+        <option value="Bronx"{% if borough == 'Bronx' %} selected{% endif %}>Bronx</option>
+        <option value="Staten Island"{% if borough == 'Staten Island' %} selected{% endif %}>Staten Island</option>
       </select>
     </div>
     <div style="margin-top:1rem;">
       <label><strong>Or BBL:</strong></label><br>
-      <input type="text" name="bbl" placeholder="1-00862-1274" style="width:300px;" value="">
+      <input type="text" name="bbl" placeholder="1-00862-1274" style="width:300px;" value="{{ bbl_input or '' }}">
     </div>
     <button type="submit" style="margin-top:1rem;">Search</button>
   </form>
