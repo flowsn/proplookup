@@ -206,7 +206,7 @@ HTML_TEMPLATE = '''
       <div id="taxmap"></div>
     </div>
 
-    <h2>{{ full_address }} (BBL: {{ bc }}-{{ block }}-{{ lot }})</h2>
+    <h2>{{ full_address }}{% if not full_address.startswith('BBL') %} (BBL: {{ bc }}-{{ block }}-{{ lot }}){% endif %}</h2>
     <ul>
       {% if lat and lon %}
       <li><a href="https://roadview.planninglabs.nyc/view/{{ lon }}/{{ lat }}" target="_blank">Cyclomedia View</a></li>
