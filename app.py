@@ -7,20 +7,17 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# API keys
-GEOCLIENT_KEY = '3bd5c70fec6f4c8f9a59821a303eeb72'  # Primary key
-GEOCLIENT_SECONDARY_KEY = '107c23829655446a98802eeceb127c7b'  # Secondary key
+GEOCLIENT_KEY = '3bd5c70fec6f4c8f9a59821a303eeb72'
+GEOCLIENT_SECONDARY_KEY = '107c23829655446a98802eeceb127c7b'
 GOOGLE_KEY = 'AIzaSyDBCR8XDh6aVnm0JaQGH4pLzG_KXy2Nsro'
 
 
-# Helper to parse datetime strings
 def parse_datetime(dt_str):
     try:
         return datetime.strptime(dt_str, '%m/%d/%Y %I:%M:%S %p')
     except:
         return datetime.min
 
-# Build ACRIS document image URL
 def generate_document_url(doc_id):
     return f"https://a836-acris.nyc.gov/DS/DocumentSearch/DocumentImageView?doc_id={doc_id}"
 
@@ -163,9 +160,11 @@ HTML_TEMPLATE = '''
 <head>
   <meta charset="utf-8">
   <title>NYC Property Lookup</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <style>
     body { font-family: sans-serif; padding: 2rem; }
     .maps { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+    .maps.single { grid-template-columns: 1fr; }
     table { border-collapse: collapse; width: 100%; font-size: 0.85rem; margin-top:1rem; }
     th, td { border: 1px solid #ccc; padding: 0.3rem 0.5rem; text-align: left; }
     th { background: #eaeaea; }
@@ -174,6 +173,8 @@ HTML_TEMPLATE = '''
     .tax-lien { background: #d0eaff; }
     .ucc      { background: #d3d3d3; }
     .other    { background: #f0f0f0; }
+    #taxmap   { height: 300px; border: 1px solid #ccc; }
+    .leaflet-interactive { cursor: pointer; }
   </style>
 </head>
 <body>
@@ -198,12 +199,12 @@ HTML_TEMPLATE = '''
   </form>
 
   {% if full_address %}
-    {% if lat and lon %}
-      <div class="maps">
-        <iframe width="100%" height="300" src="https://www.google.com/maps/embed/v1/streetview?key={{ google_key }}&location={{ lat }},{{ lon }}" allowfullscreen></iframe>
-        <iframe width="100%" height="300" src="https://www.google.com/maps/embed/v1/place?key={{ google_key }}&q={{ lat }},{{ lon }}" allowfullscreen></iframe>
-      </div>
-    {% endif %}
+    <div class="maps{% if not (lat and lon) %} single{% endif %}">
+      {% if lat and lon %}
+      <iframe width="100%" height="300" src="https://www.google.com/maps/embed/v1/streetview?key={{ google_key }}&location={{ lat }},{{ lon }}" allowfullscreen></iframe>
+      {% endif %}
+      <div id="taxmap"></div>
+    </div>
 
     <h2>{{ full_address }} (BBL: {{ bc }}-{{ block }}-{{ lot }})</h2>
     <ul>
@@ -242,6 +243,106 @@ HTML_TEMPLATE = '''
       <p>No documents found.</p>
     {% endif %}
 
+  {% endif %}
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  {% if full_address %}
+  <script>
+  (function() {
+    var CURRENT_BBL = "{{ bc }}{{ block }}{{ lot }}";
+    var INIT_LAT = {{ lat if lat is not none else 'null' }};
+    var INIT_LON = {{ lon if lon is not none else 'null' }};
+
+    var map = L.map('taxmap');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap &copy; Carto',
+      maxZoom: 21
+    }).addTo(map);
+
+    var parcelLayer = null;
+    var moveTimer = null;
+
+    function getCentroid(geom) {
+      var coords;
+      if (geom.type === 'Polygon') coords = geom.coordinates[0];
+      else if (geom.type === 'MultiPolygon') coords = geom.coordinates[0][0];
+      else return null;
+      var sLon = 0, sLat = 0;
+      for (var i = 0; i < coords.length; i++) { sLon += coords[i][0]; sLat += coords[i][1]; }
+      return [sLon / coords.length, sLat / coords.length];
+    }
+
+    function loadParcels() {
+      if (map.getZoom() < 14) {
+        if (parcelLayer) { map.removeLayer(parcelLayer); parcelLayer = null; }
+        return;
+      }
+      var b = map.getBounds();
+      var bbox = b.getWest() + ',' + b.getSouth() + ',' + b.getEast() + ',' + b.getNorth();
+      var url = 'https://services5.arcgis.com/GfwWNkhOj9bNBqoJ/arcgis/rest/services/MAPPLUTO/FeatureServer/0/query'
+        + '?geometry=' + encodeURIComponent(bbox)
+        + '&geometryType=esriGeometryEnvelope'
+        + '&inSR=4326&spatialRel=esriSpatialRelIntersects'
+        + '&outFields=BBL,Address&f=geojson&outSR=4326&resultRecordCount=300';
+
+      fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (parcelLayer) map.removeLayer(parcelLayer);
+          parcelLayer = L.geoJSON(data, {
+            style: function(feature) {
+              var bbl = String(feature.properties.BBL || '').padStart(10, '0');
+              var cur = bbl === CURRENT_BBL;
+              return {
+                fillColor: cur ? '#ff7800' : '#3388ff',
+                weight: cur ? 3 : 1,
+                color: cur ? '#cc4400' : '#555',
+                fillOpacity: cur ? 0.5 : 0.15,
+                opacity: 1
+              };
+            },
+            onEachFeature: function(feature, layer) {
+              var bbl = String(feature.properties.BBL || '').padStart(10, '0');
+              layer.bindTooltip(feature.properties.Address || bbl, {sticky: true});
+              layer.on('click', function() {
+                var bc = bbl[0];
+                var blk = bbl.slice(1, 6);
+                var lt = bbl.slice(6);
+                window.location.href = '/?bbl=' + bc + '-' + blk + '-' + lt;
+              });
+            }
+          }).addTo(map);
+        })
+        .catch(function(e) { console.error('Parcel load failed:', e); });
+    }
+
+    function initMap(lat, lon) {
+      map.setView([lat, lon], 18);
+      loadParcels();
+      map.on('moveend', function() {
+        clearTimeout(moveTimer);
+        moveTimer = setTimeout(loadParcels, 300);
+      });
+    }
+
+    if (INIT_LAT !== null && INIT_LON !== null) {
+      initMap(INIT_LAT, INIT_LON);
+    } else {
+      var bblNum = parseInt(CURRENT_BBL, 10);
+      fetch('https://services5.arcgis.com/GfwWNkhOj9bNBqoJ/arcgis/rest/services/MAPPLUTO/FeatureServer/0/query'
+        + '?where=BBL%3D' + bblNum
+        + '&outFields=BBL&returnGeometry=true&f=geojson&outSR=4326')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.features && data.features.length > 0) {
+            var c = getCentroid(data.features[0].geometry);
+            if (c) initMap(c[1], c[0]);
+          }
+        })
+        .catch(function(e) { console.error('BBL centroid lookup failed:', e); });
+    }
+  })();
+  </script>
   {% endif %}
 </body>
 </html>
