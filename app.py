@@ -108,6 +108,20 @@ def generate_tax_url(bc, block, lot):
     pin = f"{int(bc)}{block}{lot}"
     return f"https://a836-pts-access.nyc.gov/care/datalets/datalet.aspx?mode=profileall2&s&UseSearch=no&pin={pin}&jur=65"
 
+@app.route('/debug-bbl')
+def debug_bbl():
+    from flask import jsonify
+    bc = request.args.get('bc', '3')
+    block = request.args.get('block', '03245')
+    lot = request.args.get('lot', '0011')
+    headers = {'Ocp-Apim-Subscription-Key': GEOCLIENT_KEY}
+    params = {'borough': bc, 'block': str(int(block)), 'lot': str(int(lot))}
+    resp = requests.get('https://api.nyc.gov/geoclient/v2/bbl', params=params, headers=headers)
+    if resp.status_code == 401 and GEOCLIENT_SECONDARY_KEY:
+        headers['Ocp-Apim-Subscription-Key'] = GEOCLIENT_SECONDARY_KEY
+        resp = requests.get('https://api.nyc.gov/geoclient/v2/bbl', params=params, headers=headers)
+    return jsonify(resp.json())
+
 @app.route('/')
 def index():
     street = request.args.get('street')
