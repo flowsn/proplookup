@@ -1,6 +1,8 @@
 # Agent instructions
 
 Read `docs/CLAUDE_CODE_CODEX_HANDOFF.md` before changing architecture.
+Read `memory.md` for prior session progress, decisions and open blockers
+before starting work, and append a new entry to it when your session ends.
 
 Primary objectives:
 1. Preserve Hetzner shared-hosting compatibility.
