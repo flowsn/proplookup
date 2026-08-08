@@ -1,0 +1,44 @@
+{
+  "type": "FeatureCollection",
+  "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::4326"}},
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "source_key": "test:001",
+        "address_text": "Teststrasse 1, 80331 Munich",
+        "geometry_status": "derived",
+        "geometry_confidence": 0.8
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [11.5750, 48.1365],
+          [11.5762, 48.1365],
+          [11.5762, 48.1375],
+          [11.5750, 48.1375],
+          [11.5750, 48.1365]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "source_key": "test:002",
+        "address_text": "Teststrasse 2, 80331 Munich",
+        "geometry_status": "official",
+        "geometry_confidence": 1.0
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [11.5762, 48.1365],
+          [11.5774, 48.1365],
+          [11.5774, 48.1375],
+          [11.5762, 48.1375],
+          [11.5762, 48.1365]
+        ]]
+      }
+    }
+  ]
+}

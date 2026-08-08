@@ -59,6 +59,8 @@ def parcel_detail(parcel_id: str) -> dict[str, Any] | None:
     """
     with _conn() as conn:
         row = conn.execute(sql, (parcel_id,)).fetchone()
+    if row is not None:
+        row["id"] = str(row["id"])
     return row
 
 
