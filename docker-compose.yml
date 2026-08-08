@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_DB: mfh
+      POSTGRES_USER: mfh
+      POSTGRES_PASSWORD: mfh
+    ports:
+      - "5432:5432"
+    volumes:
+      - mfh_pgdata:/var/lib/postgresql/data
+
+volumes:
+  mfh_pgdata:

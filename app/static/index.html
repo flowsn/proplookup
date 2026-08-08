@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Munich MFH Scout</title>
+  <link href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet">
+  <style>
+    html,body,#app{height:100%;margin:0;font-family:system-ui,sans-serif}
+    #app{display:grid;grid-template-columns:minmax(0,1fr) 340px}
+    #map{height:100%}
+    aside{padding:18px;border-left:1px solid #ddd;overflow:auto;background:#fff}
+    .muted{color:#666}.kv{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}
+    .kv div{padding:8px;background:#f5f5f5;border-radius:6px}.status{font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+    @media(max-width:760px){#app{grid-template-columns:1fr;grid-template-rows:65% 35%}aside{border-left:0;border-top:1px solid #ddd}}
+  </style>
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+  <aside>
+    <h2 style="margin-top:0">Munich MFH Scout</h2>
+    <p class="muted">Click a parcel to inspect it.</p>
+    <div id="detail">No parcel selected.</div>
+  </aside>
+</div>
+<script src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
+<script>
+const API = window.MFH_API || 'http://localhost:5000';
+const map = new maplibregl.Map({
+  container:'map',
+  center:[11.5761,48.1372], zoom:13,
+  style:{version:8,sources:{osm:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,attribution:'© OpenStreetMap'}},layers:[{id:'osm',type:'raster',source:'osm'}]}
+});
+
+async function loadParcels(){
+  const b=map.getBounds();
+  const bbox=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].join(',');
+  const res=await fetch(`${API}/parcels?bbox=${encodeURIComponent(bbox)}`);
+  if(!res.ok)return;
+  const geo=await res.json();
+  const src=map.getSource('parcels');
+  if(src) src.setData(geo);
+  else {
+    map.addSource('parcels',{type:'geojson',data:geo,promoteId:'id'});
+    map.addLayer({id:'parcel-fill',type:'fill',source:'parcels',paint:{'fill-color':'#2878b5','fill-opacity':0.16}});
+    map.addLayer({id:'parcel-line',type:'line',source:'parcels',paint:{'line-color':'#1d4f73','line-width':1}});
+    map.addLayer({id:'parcel-selected',type:'line',source:'parcels',filter:['==',['get','id'],''],paint:{'line-color':'#000','line-width':3}});
+  }
+}
+
+map.on('load',loadParcels);
+map.on('moveend',loadParcels);
+map.on('click','parcel-fill',async e=>{
+  const f=e.features[0];
+  map.setFilter('parcel-selected',['==',['get','id'],f.properties.id]);
+  const res=await fetch(`${API}/parcels/${f.properties.id}`);
+  const p=await res.json();
+  document.getElementById('detail').innerHTML=`
+    <div class="status">${p.geometry_status || 'unknown'} geometry</div>
+    <h3>${p.address_text || 'Unnamed parcel'}</h3>
+    <div class="kv">
+      <div><small>Area</small><br><strong>${Math.round(p.official_area_m2 || p.derived_area_m2 || p.map_area_m2 || 0)} m²</strong></div>
+      <div><small>Buildings</small><br><strong>${p.building_count || 0}</strong></div>
+      <div><small>Est. GFA</small><br><strong>${Math.round(p.gfa_estimated_m2 || 0)} m²</strong></div>
+      <div><small>Score</small><br><strong>${p.acquisition_score ?? '—'}</strong></div>
+    </div>
+    <p><b>Pipeline:</b> ${p.pipeline_status || 'new'}<br><b>Owner:</b> ${p.owner_status || 'unknown'}</p>`;
+});
+</script>
+</body>
+</html>
