@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Munich MFH Scout</title>
-  <link href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet">
+  <link href="vendor/maplibre-gl/maplibre-gl.css" rel="stylesheet">
   <style>
     html,body,#app{height:100%;margin:0;font-family:system-ui,sans-serif}
     #app{display:grid;grid-template-columns:minmax(0,1fr) 340px}
@@ -24,7 +24,7 @@
     <div id="detail">No parcel selected.</div>
   </aside>
 </div>
-<script src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
+<script src="vendor/maplibre-gl/maplibre-gl.js"></script>
 <script>
 const API = window.MFH_API || 'http://localhost:5000';
 const map = new maplibregl.Map({

@@ -3,6 +3,12 @@ from app.api_core import health, parcel_detail, parcels_bbox
 
 app = Flask(__name__)
 
+@app.after_request
+def allow_cross_origin(response):
+    # Local dev only: static assets and the API run on different ports.
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
 @app.get('/health')
 def health_route():
     return jsonify(health())

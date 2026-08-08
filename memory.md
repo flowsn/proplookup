@@ -9,6 +9,64 @@ spec and the two acceptance tests).
 
 ---
 
+## 2026-08-08 (continued)
+
+**Resolved both open blockers from the earlier entry today.**
+
+- **Vendored maplibre-gl locally** instead of loading from `unpkg.com`
+  (`registry.npmjs.org` is allowlisted here even though `unpkg.com` isn't, so
+  `npm install maplibre-gl@5.6.1` + copying `dist/maplibre-gl.js` and
+  `.css` into `app/static/vendor/maplibre-gl/` worked). `index.html` now
+  points at the local copy. This isn't just a sandbox workaround — it
+  removes a runtime CDN dependency for the real deployment too.
+- **Found + fixed a real CORS bug** while re-testing in a headless browser:
+  `app/dev_server.py` (Flask) sent no `Access-Control-Allow-Origin` header,
+  so the exact local-dev setup the README documents (static server on
+  :8080, API on :5000) silently failed the `/parcels` fetch in a real
+  browser — cross-origin request blocked. Added an `after_request` hook
+  with `Access-Control-Allow-Origin: *`, scoped to `dev_server.py` only.
+  Deliberately **not** added to `app/cgi-bin/api.py`: production serves
+  static + CGI same-origin under one domain (see `docs/HETZNER.md`), and
+  this is meant to be a restricted private tool, so a permissive CORS
+  header there would be actively wrong.
+- **Visually verified the full milestone-1 flow** with Playwright against
+  the vendored build: parcels render as filled/outlined polygons, click
+  selects a parcel (black outline), detail panel populates with address,
+  area, geometry-status badge, buildings, GFA, score, pipeline, owner.
+  OSM basemap tiles still don't load here (`tile.openstreetmap.org`
+  blocked by sandbox network policy) but that's cosmetic/environment-only —
+  the map and parcel layers render fine without it.
+- **Ran the second acceptance test** (raster → parcel polygonization) using
+  a synthetic GeoTIFF instead of the real Bavaria WMS (`geoservices.bayern.de`
+  is also blocked here, confirmed 403). Added
+  `tests/test_vectorize_parcels.py`: builds a 4x4 grid of black outline
+  lines as a small in-memory GeoTIFF (EPSG:25832, 1m pixels), runs it
+  through `etl/vectorize_parcels.vectorize()`, and asserts it recovers
+  exactly 16 valid polygons with correct provenance metadata
+  (`geometry_status=derived`, `confidence=0.30`) and correctly drops the
+  background region that touches the image edges. All passing.
+- Noted but **not fixed**: `etl/vectorize_parcels.py` triggers
+  `FutureWarning`s from `scikit-image` (`remove_small_objects(min_size=...)`
+  and `binary_closing` are both deprecated as of skimage 0.26, removed in
+  a future major version). Not a correctness issue today — output is
+  verified correct — but worth revisiting before skimage's next major bump.
+  Didn't fix now since the reliable fix (`max_size=` param) doesn't exist
+  on `scikit-image` versions below 0.26, and `requirements-dev.txt` doesn't
+  pin an upper/lower bound tight enough to guarantee that's always present.
+- Full test suite is now 14 tests, all passing:
+  `python -m pytest` (needs `DATABASE_URL` pointed at a schema-loaded
+  PostGIS instance; skips cleanly otherwise).
+
+**Still open:**
+- GitHub repo rename (`proplookup` → `munich-mfh-scout`) — user doing this
+  manually later, GitHub App integration here can't create/rename repos.
+- PR #3 (`claude/new-session-7dhou5` → `main`) still open, not merged.
+- Real WMS fetch (`etl/fetch_parzellarkarte.py` against
+  `geoservices.bayern.de`) still needs to be run by the user on a machine
+  with normal internet access — sandbox can't reach it.
+
+---
+
 ## 2026-08-08
 
 **Context:** Repo `flowsn/proplookup` previously held an unrelated NYC BBL
