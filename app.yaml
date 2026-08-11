@@ -1,2 +1,0 @@
-runtime: python312
-entrypoint: gunicorn -w 2 app:app
